@@ -1,0 +1,156 @@
+# Lokale Sprachdienste für Home Assistant auf dem Minisforum
+# Ryzen AI 9 HX 370 / Radeon 890M (gfx1150)
+#
+#   whisper  Spracherkennung auf der GPU (ROCm)   Port 10300
+#   piper    Sprachausgabe auf der CPU            Port 10200
+#   phonon     Sprachausgabe Deutsch, CPU (Test)  Port 10206, API 8881
+#   phonon-en  Sprachausgabe Englisch, CPU (Test) Port 10207, API 8882
+#
+# Ersetzt die bisherigen Whisper- und Piper-Container. Die Ports bleiben
+# gleich, die Einträge in Home Assistant funktionieren also weiter.
+#
+# Ablage: im Wurzelverzeichnis des geklonten Repos ndom91/ha-voice-rocm
+# Vorher: die alten Whisper-/Piper-Container stoppen (Ports belegt)
+# Start:  docker compose -f docker-compose.voice.yml up -d --build
+# Log:    docker compose -f docker-compose.voice.yml logs -f whisper
+#
+# Phonon braucht HF_TOKEN in .env (Modell ist gated, Bedingungen auf
+# huggingface.co/gradium/phonon-40m-de akzeptieren)
+
+services:
+  whisper:
+    build:
+      context: ./whisper
+      # Angepasstes Dockerfile (Fix für ctranslate2-rocm, Ziel gfx1150)
+      dockerfile: Dockerfile.890m
+      args:
+        GFX_TARGET: gfx1150
+        # Gleichzeitige Compiler beim Bau; 8 ist sicher, auch wenn
+        # LM Studio nebenher läuft
+        MAKE_JOBS: "8"
+    container_name: whisper-rocm
+    restart: unless-stopped
+
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri
+    security_opt:
+      - seccomp:unconfined
+    group_add:
+      - video
+      - render
+
+    environment:
+      HSA_OVERRIDE_GFX_VERSION: "11.5.0"
+      HIP_VISIBLE_DEVICES: "0"
+      ROCM_PATH: /opt/rocm
+      LD_LIBRARY_PATH: /usr/local/lib:/opt/rocm/lib:/opt/rocm/lib/llvm/lib
+      CTRANSLATE2_ROOT: /usr/local
+
+    # Eigener Start statt entrypoint.sh: das Original legt die Sprache
+    # fest auf Englisch
+    entrypoint:
+      - python3
+      - -m
+      - wyoming_faster_whisper
+      - --uri
+      - tcp://0.0.0.0:10300
+      # Fest auf faster-whisper, nur das nutzt das ROCm-CTranslate2
+      - --stt-library
+      - faster-whisper
+      - --model
+      - large-v3-turbo
+      - --language
+      - de
+      - --device
+      - cuda          # richtig so: ROCm meldet sich über HIP als "cuda"
+      - --compute-type
+      - float16
+      - --beam-size
+      - "1"
+      # Silero-VAD vor Whisper: Stille und Rauschen erreichen Whisper nicht,
+      # sonst erfindet es "Vielen Dank." (gemessen 2026-10-20: 9 von 9).
+      - --vad-filter
+      - --data-dir
+      - /data
+      # Erkannter Text jeder Anfrage im Log; ohne das schreibt diese Version
+      # nichts (eingeschaltet 2026-11-16)
+      - --debug
+
+    ports:
+      - "10300:10300"
+    volumes:
+      - ./whisper-rocm-data:/data
+
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; s=socket.socket(); s.connect(('localhost',10300)); s.close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  # Piper bleibt auf der CPU: Es ist dort schon schneller als jede
+  # Wartezeit, die man hört, und die GPU bleibt frei für Whisper und LM Studio
+  piper:
+    image: rhasspy/wyoming-piper
+    container_name: piper
+    restart: unless-stopped
+    command:
+      - --voice
+      - de_DE-thorsten-high
+    ports:
+      - "10200:10200"
+    volumes:
+      - ./piper-data:/data
+
+  # Phonon (Gradium) läuft zum Vergleich neben Piper, ebenfalls nur auf der CPU.
+  # Fertiges Image mit eigenem Wyoming-Server und OpenAI-API (/v1/audio/speech).
+  # Gemessen 2026-10-27: erstes Audio nach ca. 50 ms, ca. 9x schneller als Echtzeit.
+  # Achtung: "2:0" wird als Uhrzeit gelesen ("2 Uhr") - Spielstände im
+  # Prompt als "2 zu 0" ausschreiben lassen.
+  phonon:
+    image: ghcr.io/gradium-ai/ptts-openai-server:0.4.2
+    container_name: phonon-tts
+    restart: unless-stopped
+    environment:
+      HF_TOKEN: ${HF_TOKEN}
+      PTTS_MODEL: hf://gradium/phonon-40m-de
+      PTTS_LANG: de
+      PTTS_QUANT: q8
+      PTTS_WYOMING_ADDR: 0.0.0.0:10200
+      # OpenAI-Stimmnamen (alloy, nova, ...) auf die Standardstimme abbilden
+      PTTS_OPENAI_VOICES: default
+      PTTS_IGNORE_SPEED: "true"
+      # Debug: drei Zeilen je HTTP-Anfrage, mit Zeit bis zum ersten Byte und Streamdauer
+      RUST_LOG: debug
+    ports:
+      # 10205 gehört Qwen-Sohee (docker-compose.sohee.yml)
+      - "10206:10200"
+      # 8880 belegt Kokoro-FastAPI aus docker-compose.yml
+      - "8881:8880"
+    volumes:
+      # Benanntes Volume: das Image läuft nicht als root und könnte in einen
+      # von Docker angelegten Ordner nicht schreiben
+      - phonon-data:/home/phonon/.cache/huggingface
+
+  # Ein Phonon-Server meldet HA nur eine Sprache, daher eine zweite Instanz
+  # für englische Pipelines. 31m ist Apache 2.0 und nicht gated (kein Token).
+  phonon-en:
+    image: ghcr.io/gradium-ai/ptts-openai-server:0.4.2
+    container_name: phonon-tts-en
+    restart: unless-stopped
+    environment:
+      PTTS_MODEL: hf://gradium/phonon-31m-en
+      PTTS_LANG: en
+      PTTS_QUANT: q8
+      PTTS_WYOMING_ADDR: 0.0.0.0:10200
+      PTTS_OPENAI_VOICES: default
+      PTTS_IGNORE_SPEED: "true"
+    ports:
+      - "10207:10200"
+      - "8882:8880"
+    volumes:
+      - phonon-data:/home/phonon/.cache/huggingface
+
+volumes:
+  phonon-data:

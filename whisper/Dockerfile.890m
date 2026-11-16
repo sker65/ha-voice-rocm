@@ -1,0 +1,79 @@
+# Whisper (faster-whisper) mit ROCm für die Radeon 890M (gfx1150)
+# Abgeleitet von whisper/Dockerfile aus ndom91/ha-voice-rocm, mit drei Änderungen:
+#   1. Fester Stand von ctranslate2-rocm plus Fix für zwei Syntaxfehler
+#      (überzähliges Komma vor "))" in transformer.cc und whisper.cc)
+#   2. GPU-Ziel wird über alle drei CMake-Variablen gesetzt, sonst baut
+#      die HIP-Toolchain zusätzlich für gfx906
+#   3. Begrenzte Parallelität beim Kompilieren (weniger Speicherbedarf)
+#
+# Ablage: whisper/Dockerfile.890m im geklonten Repo
+
+FROM rocm/pytorch:rocm7.2.1_ubuntu24.04_py3.12_pytorch_release_2.9.1
+
+WORKDIR /app
+
+ENV ROCM_VERSION=7.2.1 \
+    HIP_VISIBLE_DEVICES=0 \
+    ROCM_PATH=/opt/rocm \
+    CTRANSLATE2_ROOT=/usr/local
+ENV LD_LIBRARY_PATH=/usr/local/lib:/opt/rocm/lib:/opt/rocm/lib/llvm/lib:${LD_LIBRARY_PATH}
+
+RUN apt-get update && apt-get install -y \
+    git \
+    cmake \
+    build-essential \
+    wget \
+    portaudio19-dev \
+    libsndfile1 \
+    libopenblas-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel pybind11
+
+ARG GFX_TARGET=gfx1150
+# Stand vom 27.12.2025 (Kopf des rocm-Zweigs)
+ARG CT2_COMMIT=f56c385
+# Gleichzeitige Compiler; bei genug freiem Speicher darf es mehr sein
+ARG MAKE_JOBS=8
+
+# Der perl-Aufruf entfernt das überzählige Komma vor "))"
+RUN git clone --recurse-submodules -b rocm https://github.com/paralin/ctranslate2-rocm.git /tmp/ctranslate2 && \
+    cd /tmp/ctranslate2 && \
+    git checkout ${CT2_COMMIT} && \
+    git submodule update --init --recursive && \
+    perl -0pi -e 's/,(\s*\n#endif\s*\n\s*\)\))/$1/g' src/layers/transformer.cc src/layers/whisper.cc && \
+    mkdir -p build && cd build && \
+    cmake -DCMAKE_BUILD_TYPE=Release \
+          -DWITH_HIP=ON \
+          -DWITH_MKL=OFF \
+          -DWITH_OPENBLAS=ON \
+          -DOPENMP_RUNTIME=COMP \
+          -DCMAKE_HIP_ARCHITECTURES=${GFX_TARGET} \
+          -DGPU_TARGETS=${GFX_TARGET} \
+          -DAMDGPU_TARGETS=${GFX_TARGET} \
+          -DCMAKE_HIP_COMPILER=/opt/rocm/lib/llvm/bin/clang++ \
+          -DCMAKE_C_COMPILER=/opt/rocm/lib/llvm/bin/clang \
+          -DCMAKE_CXX_COMPILER=/opt/rocm/lib/llvm/bin/clang++ \
+          -DCMAKE_PREFIX_PATH=/opt/rocm \
+          -DCMAKE_INSTALL_PREFIX=/usr/local \
+          -DBUILD_CLI=OFF \
+          .. && \
+    make -j${MAKE_JOBS} && \
+    make install && \
+    cd /tmp/ctranslate2/python && \
+    pip install --no-cache-dir . && \
+    rm -rf /tmp/ctranslate2
+
+# PyAV 19 hat die Option metadata_errors entfernt, die faster-whisper nutzt
+RUN pip install --no-cache-dir faster-whisper "av<19"
+
+RUN pip install --no-cache-dir \
+    wyoming \
+    "wyoming-faster-whisper @ git+https://github.com/rhasspy/wyoming-faster-whisper.git" \
+    "av<19"
+
+RUN mkdir -p /data/models
+
+EXPOSE 10300
+
+# Startbefehl kommt aus der Compose-Datei
