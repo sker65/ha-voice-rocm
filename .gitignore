@@ -29,3 +29,9 @@ docker-compose.override.yml
 Thumbs.db
 
 
+
+# Local install (Minisforum / Radeon 890M)
+whisper-rocm-data/
+qwen-tts-data/
+qwen-tts-sohee-data/
+build.log
