@@ -27,6 +27,7 @@ Wyoming protocol speech services (STT + TTS) for Home Assistant, targeting AMD G
 | chatterbox-turbo | TTS | 10201 | Yes (PyTorch) | Needs HF_TOKEN |
 | pocket-tts | TTS | 10202 | No (CPU) | Ultra-low latency |
 | kokoro | TTS | 10203 | No (API proxy) | Proxies to Kokoro-FastAPI |
+| phonon-tts | TTS | 10206 (+8881 HTTP) | No (CPU, Rust) | Upstream image, native Wyoming + OpenAI API |
 | parakeet | STT | 10303 | Yes (PyTorch) | NeMo parakeet-tdt-0.6b-v3 |
 | piper | TTS | — | — | Deprecated, commented out |
 

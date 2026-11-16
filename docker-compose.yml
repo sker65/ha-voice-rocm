@@ -444,6 +444,37 @@ services:
       retries: 3
       start_period: 180s
 
+  phonon-tts:
+    # Upstream image: native Wyoming server + OpenAI-compatible /v1/audio/speech
+    # CPU-only (Rust runtime, no PyTorch) - no GPU devices needed
+    image: ghcr.io/gradium-ai/ptts-openai-server:${PHONON_VERSION:-0.4.2}
+    container_name: phonon-tts
+    restart: unless-stopped
+
+    # Environment variables
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+      # Phonon configuration
+      # Models: hf://gradium/phonon-31m-en (Apache 2.0) or
+      #         hf://gradium/phonon-40m-{en,de,fr,es,pt} (gated, CC BY-NC 4.0)
+      - PTTS_MODEL=${PHONON_MODEL:-hf://gradium/phonon-40m-de}
+      - PTTS_LANG=${PHONON_LANG:-de}
+      - PTTS_QUANT=${PHONON_QUANT:-q8}
+      - PTTS_WYOMING_ADDR=0.0.0.0:10200
+      - PTTS_OPENAI_VOICES=${PHONON_OPENAI_VOICES:-default}
+      - PTTS_IGNORE_SPEED=true
+
+    # Wyoming protocol (10206; 10205 is used by docker-compose.sohee.yml)
+    # and OpenAI-compatible API (8881)
+    ports:
+      - "10206:10200"
+      - "${PHONON_API_PORT:-8881}:8880"
+
+    # Named volume for model persistence (image runs as non-root user "phonon",
+    # a host bind mount created by Docker would be root-owned and unwritable)
+    volumes:
+      - phonon-data:/home/phonon/.cache/huggingface
+
   wyoming-moonshine:
     build:
       context: ./moonshine
@@ -754,3 +785,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 120s
+
+volumes:
+  phonon-data:
