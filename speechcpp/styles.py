@@ -8,6 +8,7 @@ Tags:
     [ruhig]                     ein Stil aus styles.json (Groß/Klein und Umlaute egal)
     [stil: leicht ironisch]     eine freie Instruktion ("style:" geht auch)
     [normal] oder [/ruhig]      zurück zum Grundstil (Stimmvariante oder Tageszeit)
+    [ruhig][freundlich]         direkt aufeinanderfolgende Tags gelten zusammen
 Unbekannte Tags werden entfernt und nie vorgelesen.
 """
 
@@ -115,22 +116,35 @@ def parse_tags(config: StyleConfig, text: str, current: Optional[str]) -> Tuple[
     """Splits text at its style tags. Returns the runs and the instruction in force after the text."""
     runs: List[Run] = []
     pos = 0
+    # Tags with only whitespace between them combine ("[ruhig][freundlich]"); a tag after text replaces
+    combined: List[str] = []
+    after_tag = False
     for match in _TAG.finditer(text):
         before = text[pos:match.start()]
         if before.strip():
             runs.append((current, before))
+            after_tag = False
         pos = match.end()
         body = match.group(1).strip()
         head, colon, rest = body.partition(":")
         key = normalize(body)
         if colon and normalize(head) in _FREE and rest.strip():
-            current = rest.strip()
+            instruction = rest.strip()
         elif key.startswith("/") or key in _RESET:
-            current = None
+            instruction = None
         elif key in config.styles:
-            current = config.styles[key]
+            instruction = config.styles[key]
         else:
             _LOGGER.info("Dropping unknown tag [%s]", body)
+            continue
+        if instruction is None:
+            combined = []
+        elif after_tag:
+            combined.append(instruction)
+        else:
+            combined = [instruction]
+        current = " ".join(i if i.endswith((".", "!", "?")) else i + "." for i in combined) or None
+        after_tag = True
     after = text[pos:]
     if after.strip():
         runs.append((current, after))
