@@ -1,0 +1,25 @@
+# speech.cpp (github.com/nyosegawa/speech.cpp) als OpenAI-kompatibler TTS-Server,
+# Vulkan über Mesas RADV, also ohne ROCm im Image.
+# Das Release-Archiv ist über seine SHA-256 festgenagelt (SHA256SUMS des Releases).
+FROM ubuntu:24.04
+
+ARG SPEECH_VERSION=0.11.0
+ARG SPEECH_SHA256=9c01a35a0c79d36ca29abe379029c71b0cfb950cbc9da835863f5f7d28c81ae8
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates curl unzip libvulkan1 mesa-vulkan-drivers && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL -o /tmp/speech.zip \
+        "https://github.com/nyosegawa/speech.cpp/releases/download/v${SPEECH_VERSION}/speech-${SPEECH_VERSION}-linux-x64-vulkan.zip" && \
+    echo "${SPEECH_SHA256}  /tmp/speech.zip" | sha256sum -c - && \
+    mkdir -p /opt/speech && unzip -q /tmp/speech.zip -d /opt/speech && \
+    chmod +x /opt/speech/speech && rm /tmp/speech.zip
+
+# Modelle (speech.cpp/models) und der Shader-Cache von RADV landen im Volume
+ENV XDG_CACHE_HOME=/data
+ENV PATH=/opt/speech:$PATH
+
+EXPOSE 8093
+ENTRYPOINT ["speech"]

@@ -1,0 +1,21 @@
+{
+  "voices": ["ono_anna", "serena", "vivian", "sohee"],
+  "default_voice": "ono_anna",
+  "language": "de",
+  "timezone": "Europe/Berlin",
+  "styles": {
+    "zuegig": "Speak at a slightly brisker pace than usual, friendly and clear.",
+    "freundlich": "Speak in a warm, cheerful and friendly tone, like a helpful assistant who is happy to help.",
+    "froehlich": "Speak happily and with enthusiasm, smiling while you talk.",
+    "ruhig": "Speak calmly and softly, slow and soothing, like reading a bedtime story.",
+    "nachrichten": "Speak like a professional news anchor: neutral, crisp, confident and a bit fast.",
+    "fluestern": "Whisper quietly, as if someone nearby is asleep.",
+    "ernst": "Speak seriously and clearly, with a concerned tone, as when giving a warning.",
+    "lachend": "Speak while laughing, amused and playful."
+  },
+  "schedule": [
+    {"from": "05:00", "style": "ruhig"},
+    {"from": "09:00", "style": "zuegig"},
+    {"from": "21:00", "style": "ruhig"}
+  ]
+}

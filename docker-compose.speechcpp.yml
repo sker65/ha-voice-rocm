@@ -1,0 +1,74 @@
+# Qwen3-TTS 1.7B CustomVoice auf speech.cpp (Vulkan) als Wyoming-TTS für Home Assistant
+# Minisforum mit Ryzen AI 9 HX 370 / Radeon 890M (gfx1150)
+#
+#   speechcpp-server   speech serve, OpenAI-API (/v1/audio/speech)   Port 8093
+#   wyoming-speechcpp  Wyoming-Shim mit Stil-Tags und Tageszeit      Port 10208
+#
+# Start:  docker compose -f docker-compose.speechcpp.yml up -d --build
+# Log:    docker compose -f docker-compose.speechcpp.yml logs -f wyoming-speechcpp
+# HA:     Wyoming Protocol, IP des Minisforum, Port 10208
+# Stile:  speechcpp/styles.json (eingebunden, Neustart des Shims genügt)
+#
+# Gemessen 2026-11-18 auf der 890M mit Vulkan: 1.7B spricht 1,4x schneller als
+# Echtzeit, erstes Audio nach ca. 50 ms, sobald das Modell warm ist.
+# Der erste Start lädt das Modell (2,3 GB) nach ./speechcpp-data.
+
+services:
+  speechcpp-server:
+    build:
+      context: ./speechcpp
+      dockerfile: Dockerfile.server
+    container_name: speechcpp-server
+    restart: unless-stopped
+    # Nur /dev/dri: Vulkan (RADV) braucht weder /dev/kfd noch ROCm
+    devices:
+      - /dev/dri:/dev/dri
+    # GIDs von video und render auf diesem Host (getent group video render);
+    # Ubuntu-Images kennen "render" nicht beim Namen
+    group_add:
+      - "44"
+      - "992"
+    command:
+      - serve
+      - qwen3-tts-1.7b
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8093"
+      - --device
+      - gpu
+      - --language
+      - de
+      - --voice
+      - ono_anna
+    ports:
+      - "8093:8093"
+    volumes:
+      - ./speechcpp-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8093/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # Erster Start: Download des Modells
+      start_period: 600s
+
+  wyoming-speechcpp:
+    build:
+      context: ./speechcpp
+    container_name: wyoming-speechcpp
+    restart: unless-stopped
+    depends_on:
+      speechcpp-server:
+        condition: service_healthy
+    command:
+      - --uri
+      - tcp://0.0.0.0:10208
+      - --api-url
+      - http://speechcpp-server:8093/v1
+      - --config
+      - /config/styles.json
+    ports:
+      - "10208:10208"
+    volumes:
+      - ./speechcpp/styles.json:/config/styles.json:ro

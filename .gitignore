@@ -35,3 +35,5 @@ whisper-rocm-data/
 qwen-tts-data/
 qwen-tts-sohee-data/
 build.log
+speechcpp-data/
+__pycache__/
