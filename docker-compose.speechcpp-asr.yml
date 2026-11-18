@@ -15,6 +15,11 @@
 #
 # Sprache erzwingen (schadet gemischten Sätzen): ASR_LANGUAGE: de
 # Die Sprache aus HA übernehmen: ASR_USE_REQUEST_LANGUAGE: "1"
+#
+# Nur für Tests: ASR_SAVE_DIR=/recordings in .env legt jede Äußerung als WAV mit
+# Transkript (transcripts.tsv) in ./speechcpp-asr-recordings ab, höchstens
+# ASR_SAVE_MAX_MB (200), die ältesten fallen zuerst weg. Danach wieder
+# austragen und die Aufnahmen löschen: es sind echte Sprachaufnahmen.
 
 x-asr-model: &asr-model
   ASR_MODEL: qwen3-asr-1.7b
@@ -67,6 +72,11 @@ services:
       ASR_USE_REQUEST_LANGUAGE: "0"
       # Kontext für das Modell, z. B. Raum- und Gerätenamen
       ASR_PROMPT: ""
+      ASR_SAVE_DIR: ${ASR_SAVE_DIR:-}
+      # Obergrenze der Aufnahmen in MB; die ältesten fallen weg
+      ASR_SAVE_MAX_MB: ${ASR_SAVE_MAX_MB:-200}
+    # Eigene UID, damit die Aufnahmen dem Benutzer gehören und nicht root
+    user: "1000:1000"
     command:
       - --uri
       - tcp://0.0.0.0:10309
@@ -74,3 +84,7 @@ services:
       - http://speechcpp-asr-server:8094/v1
     ports:
       - "10309:10309"
+    volumes:
+      - ./speechcpp-asr-recordings:/recordings
+      # Ortszeit für die Zeitstempel der Aufnahmen
+      - /etc/localtime:/etc/localtime:ro

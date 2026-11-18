@@ -38,3 +38,4 @@ build.log
 speechcpp-data/
 __pycache__/
 speechcpp-asr-data/
+speechcpp-asr-recordings/

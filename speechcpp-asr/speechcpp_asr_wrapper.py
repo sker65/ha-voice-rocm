@@ -54,6 +54,10 @@ async def main() -> None:
                         default=os.environ.get("ASR_USE_REQUEST_LANGUAGE", "") == "1")
     # Kontext für das Modell, etwa Namen von Räumen und Geräten
     parser.add_argument("--prompt", default=os.environ.get("ASR_PROMPT", ""))
+    # Nur zum Testen: jede Äußerung als WAV mit Transkript in transcripts.tsv ablegen (leer = aus)
+    parser.add_argument("--save-dir", default=os.environ.get("ASR_SAVE_DIR", ""))
+    # Obergrenze aller Aufnahmen; darüber fallen die ältesten weg (0 = keine Grenze)
+    parser.add_argument("--save-max-mb", type=float, default=float(os.environ.get("ASR_SAVE_MAX_MB") or 200))
     parser.add_argument("--api-timeout", type=float, default=60.0)
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
@@ -71,7 +75,12 @@ async def main() -> None:
         forced_language=args.language,
         use_request_language=args.use_request_language,
         prompt=args.prompt,
+        save_dir=args.save_dir,
+        save_max_bytes=int(args.save_max_mb * 1e6),
     )
+    if args.save_dir:
+        os.makedirs(args.save_dir, exist_ok=True)
+        _LOGGER.warning("Speichert jede Äußerung als WAV in %s, höchstens %.0f MB", args.save_dir, args.save_max_mb)
     server = AsyncServer.from_uri(args.uri)
     _LOGGER.info("Listening on %s, speech.cpp at %s, language %s%s", args.uri, args.api_url,
                  args.language or "auto", " (or the request's)" if args.use_request_language else "")

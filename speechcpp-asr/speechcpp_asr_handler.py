@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import time
 import wave
+from datetime import datetime
 from typing import Optional
 
 import httpx
@@ -35,6 +37,8 @@ class SpeechCppAsrEventHandler(AsyncEventHandler):
         forced_language: str,
         use_request_language: bool,
         prompt: str,
+        save_dir: str = "",
+        save_max_bytes: int = 0,
     ) -> None:
         super().__init__(reader, writer)
         self.wyoming_info = wyoming_info
@@ -43,6 +47,8 @@ class SpeechCppAsrEventHandler(AsyncEventHandler):
         self.forced_language = forced_language
         self.use_request_language = use_request_language
         self.prompt = prompt
+        self.save_dir = save_dir
+        self.save_max_bytes = save_max_bytes
 
         self.request_language: Optional[str] = None
         self.audio = bytearray()
@@ -74,6 +80,8 @@ class SpeechCppAsrEventHandler(AsyncEventHandler):
 
         if AudioStop.is_type(event.type):
             text = await self._transcribe()
+            if self.save_dir and self.audio:
+                self._save(text)
             await self.write_event(Transcript(text=text).event())
             self.audio.clear()
             self.request_language = None
@@ -100,6 +108,46 @@ class SpeechCppAsrEventHandler(AsyncEventHandler):
             wav.setframerate(self.rate)
             wav.writeframes(bytes(self.audio))
         return buffer.getvalue()
+
+    def _save(self, text: str) -> None:
+        """Legt die Äußerung als WAV ab und hängt eine Zeile an transcripts.tsv (Zeit, Datei, Sekunden, Text)."""
+        now = datetime.now()
+        name = now.strftime("%Y%m%d-%H%M%S-%f") + ".wav"
+        seconds = len(self.audio) / (self.rate * self.width * self.channels)
+        try:
+            with open(os.path.join(self.save_dir, name), "wb") as f:
+                f.write(self._wav())
+            with open(os.path.join(self.save_dir, "transcripts.tsv"), "a", encoding="utf-8") as f:
+                f.write(f"{now.isoformat(timespec='seconds')}\t{name}\t{seconds:.2f}\t{text}\n")
+            if self.save_max_bytes:
+                self._prune()
+        except OSError:
+            _LOGGER.exception("Äußerung nicht gespeichert")
+
+    def _prune(self) -> None:
+        """Löscht die ältesten Aufnahmen, bis alle zusammen unter save_max_bytes liegen, samt ihrer Zeilen in transcripts.tsv.
+
+        Die Dateinamen sind Zeitstempel, also ist die alphabetische Reihenfolge die zeitliche.
+        """
+        wavs = sorted(n for n in os.listdir(self.save_dir) if n.endswith(".wav"))
+        sizes = {n: os.path.getsize(os.path.join(self.save_dir, n)) for n in wavs}
+        total = sum(sizes.values())
+        gone = set()
+        for n in wavs:
+            if total <= self.save_max_bytes:
+                break
+            os.remove(os.path.join(self.save_dir, n))
+            total -= sizes[n]
+            gone.add(n)
+        if not gone:
+            return
+        tsv = os.path.join(self.save_dir, "transcripts.tsv")
+        with open(tsv, encoding="utf-8") as f:
+            lines = [l for l in f if l.split("\t")[1:2] and l.split("\t")[1] not in gone]
+        with open(tsv + ".tmp", "w", encoding="utf-8") as f:
+            f.writelines(lines)
+        os.replace(tsv + ".tmp", tsv)
+        _LOGGER.info("%d alte Aufnahmen gelöscht, %.1f MB übrig", len(gone), total / 1e6)
 
     async def _transcribe(self) -> str:
         frame = self.width * self.channels
