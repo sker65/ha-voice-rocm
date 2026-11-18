@@ -29,6 +29,7 @@ Wyoming protocol speech services (STT + TTS) for Home Assistant, targeting AMD G
 | kokoro | TTS | 10203 | No (API proxy) | Proxies to Kokoro-FastAPI |
 | phonon-tts | TTS | 10206 (+8881 HTTP) | No (CPU, Rust) | Upstream image, native Wyoming + OpenAI API |
 | speechcpp | TTS | 10208 (+8093 HTTP) | Yes (Vulkan, speech.cpp) | Qwen3-TTS 1.7B, style tags + time-of-day style, `docker-compose.speechcpp.yml` |
+| speechcpp-asr | STT | 10309 (+8094 HTTP) | Yes (Vulkan, speech.cpp) | Qwen3-ASR 1.7B, test only, language auto-detected, `docker-compose.speechcpp-asr.yml` |
 | parakeet | STT | 10303 | Yes (PyTorch) | NeMo parakeet-tdt-0.6b-v3 |
 | piper | TTS | — | — | Deprecated, commented out |
 

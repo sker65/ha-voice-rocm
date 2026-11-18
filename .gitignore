@@ -37,3 +37,4 @@ qwen-tts-sohee-data/
 build.log
 speechcpp-data/
 __pycache__/
+speechcpp-asr-data/

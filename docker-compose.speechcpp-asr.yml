@@ -1,0 +1,76 @@
+# Qwen3-ASR auf speech.cpp (Vulkan) als Wyoming-STT für Home Assistant (Test)
+# Minisforum mit Ryzen AI 9 HX 370 / Radeon 890M (gfx1150)
+#
+#   speechcpp-asr-server   speech serve, OpenAI-API (/v1/audio/transcriptions)   Port 8094
+#   wyoming-speechcpp-asr  Wyoming-Shim, Sprache automatisch (auch gemischt)    Port 10309
+#
+# Start:  docker compose -f docker-compose.speechcpp-asr.yml up -d --build
+# Log:    docker compose -f docker-compose.speechcpp-asr.yml logs -f wyoming-speechcpp-asr
+# HA:     Wyoming Protocol, IP des Minisforum, Port 10309
+#
+# 1.7B statt 0.6B, weil es Deutsch mit englischen Begriffen besser trifft.
+# Auf 0.6B umstellen: ASR_MODEL unten ändern (Server und Shim lesen es).
+# Der erste Start lädt das Modell (1.7B: 2,2 GB) nach ./speechcpp-asr-data;
+# vorhandene Modelle lassen sich mit cp -al aus ~/.cache/speech.cpp/models verlinken.
+#
+# Sprache erzwingen (schadet gemischten Sätzen): ASR_LANGUAGE: de
+# Die Sprache aus HA übernehmen: ASR_USE_REQUEST_LANGUAGE: "1"
+
+x-asr-model: &asr-model
+  ASR_MODEL: qwen3-asr-1.7b
+
+services:
+  speechcpp-asr-server:
+    build:
+      context: ./speechcpp
+      dockerfile: Dockerfile.server
+    container_name: speechcpp-asr-server
+    restart: unless-stopped
+    # Nur /dev/dri: Vulkan (RADV) braucht weder /dev/kfd noch ROCm
+    devices:
+      - /dev/dri:/dev/dri
+    # GIDs von video und render auf diesem Host (getent group video render);
+    # Ubuntu-Images kennen "render" nicht beim Namen
+    group_add:
+      - "44"
+      - "992"
+    environment:
+      <<: *asr-model
+    # Über die Shell, damit ASR_MODEL das Modell wählt
+    entrypoint: ["sh", "-c"]
+    command:
+      - exec speech serve "$$ASR_MODEL" --host 0.0.0.0 --port 8094 --device gpu
+    ports:
+      - "8094:8094"
+    volumes:
+      - ./speechcpp-asr-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8094/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # Erster Start: Download des Modells
+      start_period: 600s
+
+  wyoming-speechcpp-asr:
+    build:
+      context: ./speechcpp-asr
+    container_name: wyoming-speechcpp-asr
+    restart: unless-stopped
+    depends_on:
+      speechcpp-asr-server:
+        condition: service_healthy
+    environment:
+      <<: *asr-model
+      # Leer = automatisch erkennen
+      ASR_LANGUAGE: ""
+      ASR_USE_REQUEST_LANGUAGE: "0"
+      # Kontext für das Modell, z. B. Raum- und Gerätenamen
+      ASR_PROMPT: ""
+    command:
+      - --uri
+      - tcp://0.0.0.0:10309
+      - --api-url
+      - http://speechcpp-asr-server:8094/v1
+    ports:
+      - "10309:10309"
